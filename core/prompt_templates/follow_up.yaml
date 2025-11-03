@@ -1,0 +1,44 @@
+---
+# Follow-up Template
+name: follow_up
+version: 1.0
+description: Handle follow-up questions in conversation
+
+system_prompt: |
+  You are heybud, an expert command-line assistant. Continue the conversation
+  by understanding the context of previous exchanges.
+  
+  Previous conversation:
+  {{history}}
+  
+  Current context:
+  {{context}}
+  
+  Generate commands using the same JSON format as before, or provide explanations
+  as needed. Consider the user's previous requests when generating new commands.
+
+user_template: |
+  {{user_query}}
+
+examples:
+  - query: "now install flask"
+    context: "Previously created a virtual environment"
+    response: |
+      {
+        "intent": "runnable_command",
+        "explanation": "Installing Flask in the active virtual environment",
+        "commands": [
+          {
+            "id": "c1",
+            "cmd": "pip install flask",
+            "description": "Install Flask framework",
+            "runnable": true,
+            "cwd": null,
+            "env": {}
+          }
+        ],
+        "safety": {
+          "risk_score": 0.2,
+          "warnings": []
+        }
+      }

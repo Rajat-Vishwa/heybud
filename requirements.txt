@@ -1,0 +1,25 @@
+# heybud v1 - Core Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+click>=8.0.0
+rich>=13.0.0
+pydantic>=2.0.0
+pyyaml>=6.0
+pyperclip>=1.8.0
+prompt-toolkit>=3.0.0
+requests>=2.31.0
+httpx>=0.24.0
+
+# LLM Provider SDKs
+openai>=1.0.0
+anthropic>=0.7.0
+google-generativeai>=0.3.0
+
+# Optional: Development tools (install with pip install -e ".[dev]")
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# pytest-cov>=4.0.0
+# black>=23.0.0
+# mypy>=1.0.0
+# flake8>=6.0.0
