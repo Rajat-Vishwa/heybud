@@ -19,8 +19,8 @@ from cli.commands import Commands
 @click.option('--debug', is_flag=True, help='Enable debug mode')
 @click.option('--trace', is_flag=True, help='Enable tracing')
 @click.option('--no-stream', is_flag=True, help='Disable streaming')
-@click.argument('query', nargs=-1, required=False)  # <-- ADD THIS ARGUMENT
-def cli(ctx, debug, trace, no_stream, query):      # <-- ADD 'query' TO SIGNATURE
+@click.argument('query', nargs=-1, required=False)  
+def cli(ctx, debug, trace, no_stream, query):   
     """
     heybud - AI-powered CLI assistant
     
@@ -37,12 +37,11 @@ def cli(ctx, debug, trace, no_stream, query):      # <-- ADD 'query' TO SIGNATUR
     if trace:
         os.environ['HEYBUD_TRACE'] = '1'
 
-    print(query)
-
     if query:
         first_arg = query[0]
         if first_arg in ctx.command.commands:
             cmd = ctx.command.commands[first_arg]
+
             print(f"Invoking command: {first_arg} with args {query[1:]}")
             ctx.exit(ctx.invoke(cmd, *query[1:]))
         else:
@@ -62,12 +61,12 @@ def okay(force, dry_run):
     sys.exit(commands.okay(force=force, dry_run=dry_run))
 
 
+# @click.argument('text', required=False)
 @cli.command()
-@click.argument('text', required=False)
-def explain(text):
+def explain(*kwargs):
     """Explain a command or the last command"""
     commands = Commands()
-    sys.exit(commands.explain(text))
+    sys.exit(commands.explain(*kwargs))
 
 
 @cli.command()
