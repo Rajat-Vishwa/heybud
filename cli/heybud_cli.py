@@ -41,8 +41,6 @@ def cli(ctx, debug, trace, no_stream, query):
         first_arg = query[0]
         if first_arg in ctx.command.commands:
             cmd = ctx.command.commands[first_arg]
-
-            print(f"Invoking command: {first_arg} with args {query[1:]}")
             ctx.exit(ctx.invoke(cmd, *query[1:]))
         else:
             query_str = ' '.join(query)
@@ -60,8 +58,6 @@ def okay(force, dry_run):
     commands = Commands()
     sys.exit(commands.okay(force=force, dry_run=dry_run))
 
-
-# @click.argument('text', required=False)
 @cli.command()
 def explain(*kwargs):
     """Explain a command or the last command"""

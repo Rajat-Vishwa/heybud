@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-heybud v1 — AI-powered CLI assistant with multi-provider LLM support
+heybud v1 — Your friendly CLI assistant with multi-provider LLM support
 """
 from setuptools import setup, find_packages
 
