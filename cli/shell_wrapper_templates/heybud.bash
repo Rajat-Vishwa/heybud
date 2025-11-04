@@ -6,7 +6,7 @@ heybud() {
     local HEYBUD_TEMP="/tmp/heybud_output_$$.sh"
     
     # Call the CLI binary and capture output
-    heybud-cli "$@" > "$HEYBUD_TEMP" 2>&1
+    heybud "$@" > "$HEYBUD_TEMP" 2>&1
     local exit_code=$?
     
     # Check if output contains execution marker

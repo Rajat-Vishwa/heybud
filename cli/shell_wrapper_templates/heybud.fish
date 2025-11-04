@@ -5,7 +5,7 @@ function heybud
     set -l HEYBUD_TEMP "/tmp/heybud_output_"(echo %self)".sh"
     
     # Call the CLI binary and capture output
-    heybud-cli $argv > $HEYBUD_TEMP 2>&1
+    heybud $argv > $HEYBUD_TEMP 2>&1
     set -l exit_code $status
     
     # Check if output contains execution marker
