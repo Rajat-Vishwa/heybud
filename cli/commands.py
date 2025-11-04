@@ -214,10 +214,13 @@ class Commands:
                 ))
                 return 0
             
-            # Output script (shell wrapper will source it)
-            print(script)
+            # Output script to stdout (shell wrapper will source it)
+            # Use sys.stdout.write to ensure it goes to stdout, not stderr
+            sys.stdout.write(script)
+            sys.stdout.write("\n")
+            sys.stdout.flush()
             
-            # Log execution
+            # Log execution (to log files, not stdout/stderr)
             for cmd in response.commands:
                 if cmd.runnable:
                     self.logger.log_execution(
