@@ -44,7 +44,7 @@ class Commands:
         self.debug = os.getenv('HEYBUD_DEBUG', '').lower() in ('1', 'true', 'yes')
     
     def query(self, user_query: str, stream: bool = True, dry_run: bool = False) -> int:
-        """Handle a user query and generate commandbs"""
+        """Handle a user query and generate responses/commands"""
         try:
             if not self.config_manager.config.providers:
                 console.print("[red]No providers configured. Run 'heybud init' first.[/red]")
@@ -53,10 +53,14 @@ class Commands:
             # Refresh context
             self.context_manager.refresh()
             
+            # Classify query into chat vs command intent
+            mode = self._classify_query(user_query)
+            template_name = "assistant_chat" if mode == "chat" else "hybrid_command"
+
             # Create prompt
             context_str = self.context_manager.get_context_prompt()
             prompt = self.template_manager.render_prompt(
-                template_name="command_generation",
+                template_name=template_name,
                 user_query=user_query,
                 context=context_str,
                 shell_type=self.config_manager.config.shell.preferred,
@@ -71,33 +75,56 @@ class Commands:
             # Generate response
             start_time = time.time()
             
-            if stream:
-                console.print("[dim]Thinking...[/dim]\n")
-                chunks = []
-                
+            response = None
+            explanation_streamed = False
+            # Stream only for chat mode unless explicitly disabled
+            do_stream = stream
+
+            if do_stream:
+                from rich.status import Status
+                chunks: list[str] = []
+
+                def print_chunks(chunks: list[str]):
+                    buffer = ""
+                    for chunk in chunks:
+                        buffer += chunk
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            console.print(line)
+                        # Clear processed chunks
+                    chunks.clear()
+                    if buffer:
+                        console.print(buffer)
+
                 def on_chunk(chunk: str):
+                    # Stream natural text chunks
                     chunks.append(chunk)
-                    console.print(chunk, end="")
-                
-                response = orchestrator.generate(
-                    prompt,
-                    GenerateOptions(
-                        max_tokens=self.config_manager.config.safety.max_tokens,
-                        temperature=self.config_manager.config.safety.temperature,
+                    print_chunks(chunks)
+
+                with console.status("Thinking...", spinner="dots"):
+                    response = orchestrator.generate(
+                        prompt,
+                        GenerateOptions(
+                            max_tokens=self.config_manager.config.safety.max_tokens,
+                            temperature=self.config_manager.config.safety.temperature,
+                            stream=True,
+                        ),
                         stream=True,
-                    ),
-                    stream=True,
-                    on_chunk=on_chunk,
-                )
-                console.print()  # Newline after streaming
+                        on_chunk=on_chunk,
+                    )
+                console.print()  # newline after streaming
+                explanation_streamed = True
             else:
-                response = orchestrator.generate(
-                    prompt,
-                    GenerateOptions(
-                        max_tokens=self.config_manager.config.safety.max_tokens,
-                        temperature=self.config_manager.config.safety.temperature,
-                    ),
-                )
+                # Non-streamed: use spinner and then render nicely
+                from rich.status import Status
+                with console.status("Thinking...", spinner="dots"):
+                    response = orchestrator.generate(
+                        prompt,
+                        GenerateOptions(
+                            max_tokens=self.config_manager.config.safety.max_tokens,
+                            temperature=self.config_manager.config.safety.temperature,
+                        ),
+                    )
             
             duration_ms = (time.time() - start_time) * 1000
             
@@ -123,7 +150,7 @@ class Commands:
             self.context_manager.save_last_command(response)
             
             # Display response
-            self._display_response(response, dry_run)
+            self._display_response(response, dry_run, explanation_already_streamed=explanation_streamed)
             
             # Close orchestrator
             orchestrator.close_all()
@@ -317,10 +344,10 @@ class Commands:
             console.print(f"[red]Error: {e}[/red]")
             return 1
     
-    def _display_response(self, response, dry_run: bool = False) -> None:
+    def _display_response(self, response, dry_run: bool = False, explanation_already_streamed: bool = False) -> None:
         """Display LLM response"""
-        # Explanation
-        if response.explanation:
+        # Explanation (skip if we already streamed it)
+        if response.explanation and not explanation_already_streamed:
             console.print(Panel(
                 Markdown(response.explanation),
                 title="Explanation",
@@ -353,3 +380,39 @@ class Commands:
                 title="Safety Warnings",
                 border_style="yellow",
             ))
+
+    def _classify_query(self, user_query: str) -> str:
+        """Heuristic classifier: 'chat' vs 'command' intent"""
+        q = user_query.strip().lower()
+        # Questions and conversational starters
+        chat_starters = (
+            "who are you",
+            "what is",
+            "what's",
+            "explain",
+            "why",
+            "tell me",
+            "help",
+            "how does",
+        )
+        command_keywords = (
+            "install",
+            "create",
+            "generate",
+            "run ",
+            "setup",
+            "set up",
+            "build",
+            "init",
+            "configure",
+            "upgrade",
+            "uninstall",
+            "remove",
+            "deploy",
+        )
+        if any(q.startswith(s) for s in chat_starters) or q.endswith("?"):
+            return "chat"
+        if any(k in q for k in command_keywords):
+            return "command"
+        # Default to chat to avoid forcing commands
+        return "chat"
