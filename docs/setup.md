@@ -25,7 +25,7 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-<!-- ### Method 2: Direct Installation
+### Method 2: Direct Installation
 
 ```bash
 # From PyPI (when published)
@@ -33,7 +33,7 @@ pip install heybud
 
 # Or from source
 pip install git+https://github.com/Rajat-Vishwa/heybud.git
-``` -->
+```
 
 ## Initial Configuration
 
