@@ -13,6 +13,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
+from rich.status import Status
 
 from core.config import ConfigManager
 from core.context import ContextManager
@@ -77,31 +78,31 @@ class Commands:
             
             response = None
             explanation_streamed = False
-            # Stream only for chat mode unless explicitly disabled
+
             do_stream = stream
 
-            if do_stream:
-                from rich.status import Status
-                chunks: list[str] = []
+            if do_stream:                
+                from rich.live import Live
+                displayed_text = ""
+                
+                with Live(Panel(Status("Thinking...", spinner="dots"), title="heybud", title_align="left", border_style="blue"), 
+                          refresh_per_second=20, 
+                          console=console) as live:
+          
+                    def on_chunk_animated(chunk: str):
+                        nonlocal displayed_text
+                        for char in chunk:
+                            displayed_text += char
+                            
+                            live.update(Panel(
+                                Markdown(displayed_text), # Re-render Markdown
+                                title="heybud", 
+                                title_align="left",
+                                border_style="blue"
+                            ))
+                            
+                            time.sleep(0.01)
 
-                def print_chunks(chunks: list[str]):
-                    buffer = ""
-                    for chunk in chunks:
-                        buffer += chunk
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            console.print(line)
-                        # Clear processed chunks
-                    chunks.clear()
-                    if buffer:
-                        console.print(buffer)
-
-                def on_chunk(chunk: str):
-                    # Stream natural text chunks
-                    chunks.append(chunk)
-                    print_chunks(chunks)
-
-                with console.status("Thinking...", spinner="dots"):
                     response = orchestrator.generate(
                         prompt,
                         GenerateOptions(
@@ -110,13 +111,11 @@ class Commands:
                             stream=True,
                         ),
                         stream=True,
-                        on_chunk=on_chunk,
+                        on_chunk=on_chunk_animated,
                     )
-                console.print()  # newline after streaming
+                
                 explanation_streamed = True
             else:
-                # Non-streamed: use spinner and then render nicely
-                from rich.status import Status
                 with console.status("Thinking...", spinner="dots"):
                     response = orchestrator.generate(
                         prompt,
@@ -164,7 +163,8 @@ class Commands:
                 console.print(traceback.format_exc())
             self.logger.log_error(str(e), {'query': user_query})
             return 1
-    
+        
+
     def okay(self, force: bool = False, dry_run: bool = False) -> int:
         """Execute the last generated command"""
         try:
