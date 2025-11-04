@@ -21,8 +21,9 @@ heybud is a smart command-line tool that understands what you want to do and sug
 # Install
 pip install heybud
 
-# Set up (interactive wizard)
-heybud init
+# Set up (interactive wizard) 
+# (Use heybud-cli when running for the first time)
+heybud-cli init 
 
 # Ask for help
 heybud "create a python virtual environment"

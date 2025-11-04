@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="heybud",
-    version="1.0.0",
+    version="0.0.1a1",
     author="Rajat Vishwa",
     description="AI-powered CLI assistant with multi-provider LLM support",
     long_description=long_description,
