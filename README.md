@@ -1,6 +1,6 @@
 # heybud
 
-> **heybud**: Because typing `docker run -p 8080:80 --name myapp myimage:latest` shouldn't require remembering all the flags.
+> **heybud**: Because typing `docker run -p 8080:80 -v /data:/app/data --name myapp myimage:latest` shouldn't require remembering all the flags.
 
 Your friendly AI assistant that lives in your terminal, helping you craft the perfect commands.
 

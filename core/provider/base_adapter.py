@@ -144,14 +144,8 @@ class ProviderAdapter(ABC):
     
     def _build_system_prompt(self, prompt: Prompt) -> str:
         """Build system prompt with context"""
-        parts = []
-        
-        if prompt.system_context:
-            parts.append(prompt.system_context)
-        
-        parts.append(f"Generate commands for {prompt.shell_type} shell.")
-        
-        return "\n\n".join(parts)
+        # Trust the template's system_context entirely; do not force command-generation text
+        return prompt.system_context or ""
     
     def _build_messages(self, prompt: Prompt) -> list[dict[str, str]]:
         """Build message history for chat-based models"""

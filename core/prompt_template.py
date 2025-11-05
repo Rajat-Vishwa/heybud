@@ -30,8 +30,20 @@ class PromptTemplateManager:
             try:
                 with open(template_file, 'r') as f:
                     template_data = yaml.safe_load(f)
-                    name = template_data.get('name', template_file.stem)
-                    self.templates[name] = template_data
+                    # Handle empty files gracefully
+                    if template_data is None:
+                        # Treat as empty template with just a name
+                        name = template_file.stem
+                        self.templates[name] = {
+                            'name': name,
+                            'version': '1.0',
+                            'description': f'Template {name}',
+                            'system_prompt': '',
+                            'user_template': '{{user_query}}',
+                        }
+                    else:
+                        name = template_data.get('name', template_file.stem)
+                        self.templates[name] = template_data
             except Exception as e:
                 print(f"Warning: Failed to load template {template_file}: {e}")
     

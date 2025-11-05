@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
+from rich.status import Status
+from rich.text import Text
 
 from core.config import ConfigManager
 from core.context import ContextManager
@@ -30,8 +32,7 @@ from core.types import (
     FailoverStrategy,
 )
 
-console = Console()
-
+console = Console(stderr=True)
 
 class Commands:
     """CLI command implementations"""
@@ -44,7 +45,7 @@ class Commands:
         self.debug = os.getenv('HEYBUD_DEBUG', '').lower() in ('1', 'true', 'yes')
     
     def query(self, user_query: str, stream: bool = True, dry_run: bool = False) -> int:
-        """Handle a user query and generate commandbs"""
+        """Handle a user query and generate responses/commands"""
         try:
             if not self.config_manager.config.providers:
                 console.print("[red]No providers configured. Run 'heybud init' first.[/red]")
@@ -53,10 +54,14 @@ class Commands:
             # Refresh context
             self.context_manager.refresh()
             
+            # Classify query into chat vs command intent
+            mode = self._classify_query(user_query)
+            template_name = "assistant_chat" if mode == "chat" else "hybrid_command"
+
             # Create prompt
             context_str = self.context_manager.get_context_prompt()
             prompt = self.template_manager.render_prompt(
-                template_name="command_generation",
+                template_name=template_name,
                 user_query=user_query,
                 context=context_str,
                 shell_type=self.config_manager.config.shell.preferred,
@@ -71,45 +76,102 @@ class Commands:
             # Generate response
             start_time = time.time()
             
-            if stream:
-                console.print("[dim]Thinking...[/dim]\n")
-                chunks = []
+            response = None
+            explanation_streamed = False
+
+            do_stream = stream
+
+            if do_stream:                
+                from rich.live import Live
+                displayed_text = ""
                 
-                def on_chunk(chunk: str):
-                    chunks.append(chunk)
-                    console.print(chunk, end="")
-                
-                response = orchestrator.generate(
-                    prompt,
-                    GenerateOptions(
-                        max_tokens=self.config_manager.config.safety.max_tokens,
-                        temperature=self.config_manager.config.safety.temperature,
+                with Live(Panel(Status("Thinking...", spinner="dots"), title="heybud", title_align="left", border_style="blue"), 
+                          refresh_per_second=20, 
+                          console=console) as live:
+                    
+                    def render_panel_with_body(body_renderable):
+                        return Panel(
+                            body_renderable,
+                            title="heybud",
+                            title_align="left",
+                            border_style="blue",
+                        )
+          
+                    def on_chunk_animated(chunk: str):
+                        nonlocal displayed_text
+                        for char in chunk:
+                            displayed_text += char
+                            # Stream the explanation as Markdown inside the same panel
+                            live.update(render_panel_with_body(Markdown(displayed_text)))
+                            time.sleep(0.01)
+
+                    # Stream tokens
+                    response = orchestrator.generate(
+                        prompt,
+                        GenerateOptions(
+                            max_tokens=self.config_manager.config.safety.max_tokens,
+                            temperature=self.config_manager.config.safety.temperature,
+                            stream=True,
+                        ),
                         stream=True,
-                    ),
-                    stream=True,
-                    on_chunk=on_chunk,
-                )
-                console.print()  # Newline after streaming
+                        on_chunk=on_chunk_animated,
+                    )
+
+                    # After streaming completes, run a quick safety scan and append runnable commands (if any)
+                    if response and response.commands:
+                        scanner = SafetyScanner(self.config_manager.config.safety)
+                        safety_analysis = scanner.scan_commands(response.commands)
+                        response.safety = safety_analysis
+                        for cmd in response.commands:
+                            cmd_analysis = scanner.scan_command(cmd)
+                            cmd.risk_score = cmd_analysis.risk_score
+
+                        # Build a bash snippet for display (non-executable here)
+                        snippet_lines = ["#heybud_runnable"]
+                        # Mirror cwd/env in the snippet for context
+                        for cmd in response.commands:
+                            if cmd.cwd:
+                                snippet_lines.append(f"cd {cmd.cwd}")
+                            for k, v in (cmd.env or {}).items():
+                                snippet_lines.append(f"export {k}='{v}'")
+                            if cmd.cmd:
+                                snippet_lines.append(cmd.cmd)
+                        snippet = "\n".join(snippet_lines).strip()
+
+                        # Minimal high-risk flag if any command is high risk
+                        high_risk = any((getattr(cmd, 'risk_score', 0.0) or 0.0) >= 0.7 for cmd in response.commands)
+                        parts = [Markdown(displayed_text.strip())]
+                        parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
+                        if high_risk:
+                            parts.append(Text("HIGH RISK", style="bold red"))
+                        body = Group(*parts)
+                        live.update(render_panel_with_body(body))
+                        # Keep the final view stable for a brief moment
+                        time.sleep(0.1)
+                
+                explanation_streamed = True
             else:
-                response = orchestrator.generate(
-                    prompt,
-                    GenerateOptions(
-                        max_tokens=self.config_manager.config.safety.max_tokens,
-                        temperature=self.config_manager.config.safety.temperature,
-                    ),
-                )
+                with console.status("Thinking...", spinner="dots"):
+                    response = orchestrator.generate(
+                        prompt,
+                        GenerateOptions(
+                            max_tokens=self.config_manager.config.safety.max_tokens,
+                            temperature=self.config_manager.config.safety.temperature,
+                        ),
+                    )
             
             duration_ms = (time.time() - start_time) * 1000
             
-            # Safety scan
-            scanner = SafetyScanner(self.config_manager.config.safety)
-            safety_analysis = scanner.scan_commands(response.commands)
-            response.safety = safety_analysis
-            
-            # Update command risk scores
-            for cmd in response.commands:
-                cmd_analysis = scanner.scan_command(cmd)
-                cmd.risk_score = cmd_analysis.risk_score
+            # Safety scan (skip recomputation if already done during streaming)
+            if not (do_stream and explanation_streamed):
+                scanner = SafetyScanner(self.config_manager.config.safety)
+                safety_analysis = scanner.scan_commands(response.commands)
+                response.safety = safety_analysis
+                
+                # Update command risk scores
+                for cmd in response.commands:
+                    cmd_analysis = scanner.scan_command(cmd)
+                    cmd.risk_score = cmd_analysis.risk_score
             
             # Log query
             self.logger.log_query(
@@ -123,7 +185,13 @@ class Commands:
             self.context_manager.save_last_command(response)
             
             # Display response
-            self._display_response(response, dry_run)
+            # If we streamed and already rendered the commands panel, skip re-displaying
+            self._display_response(
+                response,
+                dry_run,
+                explanation_already_streamed=explanation_streamed,
+                commands_already_displayed=do_stream and explanation_streamed and bool(response.commands),
+            )
             
             # Close orchestrator
             orchestrator.close_all()
@@ -137,7 +205,8 @@ class Commands:
                 console.print(traceback.format_exc())
             self.logger.log_error(str(e), {'query': user_query})
             return 1
-    
+        
+
     def okay(self, force: bool = False, dry_run: bool = False) -> int:
         """Execute the last generated command"""
         try:
@@ -237,7 +306,7 @@ class Commands:
                 import traceback
                 console.print(traceback.format_exc())
             return 1
-    
+
     def explain(self, text: Optional[str] = None) -> int:
         """Explain a command or the last command"""
         try:
@@ -249,31 +318,7 @@ class Commands:
                     return 1
                 text = " && ".join(cmd.cmd for cmd in response.commands)
             
-            # Query LLM for explanation
-            context_str = self.context_manager.get_context_prompt()
-            prompt = self.template_manager.render_prompt(
-                template_name="explain",
-                user_query=text,
-                context=context_str,
-                shell_type=self.config_manager.config.shell.preferred,
-            )
-            
-            orchestrator = ProviderOrchestrator(
-                self.config_manager.config.providers,
-                self.config_manager.config.failover_strategy,
-            )
-            
-            response = orchestrator.generate(prompt, GenerateOptions())
-            
-            # Display explanation
-            console.print(Panel(
-                Markdown(response.explanation),
-                title="Explanation",
-                border_style="green",
-            ))
-            
-            orchestrator.close_all()
-            return 0
+            self.query(text, stream=True, dry_run=False)
             
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
@@ -317,31 +362,40 @@ class Commands:
             console.print(f"[red]Error: {e}[/red]")
             return 1
     
-    def _display_response(self, response, dry_run: bool = False) -> None:
+    def _display_response(self, response, dry_run: bool = False, explanation_already_streamed: bool = False, commands_already_displayed: bool = False) -> None:
         """Display LLM response"""
-        # Explanation
-        if response.explanation:
+        # Unified panel with explanation and a code block for commands
+        body_parts = []
+        if response.explanation and not explanation_already_streamed:
+            body_parts.append(Markdown(response.explanation))
+
+        if response.commands and not commands_already_displayed:
+            snippet_lines = ["#heybud_runnable"]
+            for cmd in response.commands:
+                if cmd.cwd:
+                    snippet_lines.append(f"cd {cmd.cwd}")
+                for k, v in (cmd.env or {}).items():
+                    snippet_lines.append(f"export {k}='{v}'")
+                if cmd.cmd:
+                    snippet_lines.append(cmd.cmd)
+            snippet = "\n".join(snippet_lines).strip()
+            body_parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
+
+            # Minimal high-risk flag beneath the snippet
+            if any((getattr(cmd, 'risk_score', 0.0) or 0.0) >= 0.7 for cmd in response.commands):
+                body_parts.append(Text("HIGH RISK", style="bold red"))
+
+        if body_parts:
             console.print(Panel(
-                Markdown(response.explanation),
-                title="Explanation",
+                Group(*body_parts),
+                title="heybud",
+                title_align="left",
                 border_style="blue",
             ))
             console.print()
-        
-        # Commands
+
+        # Quick hints
         if response.commands:
-            for cmd in response.commands:
-                risk_color = "green" if cmd.risk_score < 0.4 else "yellow" if cmd.risk_score < 0.7 else "red"
-                
-                console.print(Panel(
-                    f"[bold]{cmd.description}[/bold]\n\n"
-                    f"[{risk_color}]{cmd.cmd}[/{risk_color}]\n\n"
-                    f"Risk: {cmd.risk_score:.2f}",
-                    title=f"Command {cmd.id}",
-                    border_style=risk_color,
-                ))
-            
-            console.print()
             console.print("[dim]To execute: [/dim][bold green]heybud okay[/bold green]")
             console.print("[dim]To copy: [/dim][bold]heybud copy[/bold]")
         
@@ -353,3 +407,39 @@ class Commands:
                 title="Safety Warnings",
                 border_style="yellow",
             ))
+
+    def _classify_query(self, user_query: str) -> str:
+        """Heuristic classifier: 'chat' vs 'command' intent"""
+        q = user_query.strip().lower()
+        # Questions and conversational starters
+        chat_starters = (
+            "who are you",
+            "what is",
+            "what's",
+            "explain",
+            "why",
+            "tell me",
+            "help",
+            "how does",
+        )
+        command_keywords = (
+            "install",
+            "create",
+            "generate",
+            "run ",
+            "setup",
+            "set up",
+            "build",
+            "init",
+            "configure",
+            "upgrade",
+            "uninstall",
+            "remove",
+            "deploy",
+        )
+        if any(q.startswith(s) for s in chat_starters) or q.endswith("?"):
+            return "chat"
+        if any(k in q for k in command_keywords):
+            return "command"
+        # Default to chat to avoid forcing commands
+        return "chat"
