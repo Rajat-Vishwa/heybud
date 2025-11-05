@@ -306,7 +306,7 @@ class Commands:
                 import traceback
                 console.print(traceback.format_exc())
             return 1
-    
+
     def explain(self, text: Optional[str] = None) -> int:
         """Explain a command or the last command"""
         try:
@@ -318,31 +318,7 @@ class Commands:
                     return 1
                 text = " && ".join(cmd.cmd for cmd in response.commands)
             
-            # Query LLM for explanation
-            context_str = self.context_manager.get_context_prompt()
-            prompt = self.template_manager.render_prompt(
-                template_name="explain",
-                user_query=text,
-                context=context_str,
-                shell_type=self.config_manager.config.shell.preferred,
-            )
-            
-            orchestrator = ProviderOrchestrator(
-                self.config_manager.config.providers,
-                self.config_manager.config.failover_strategy,
-            )
-            
-            response = orchestrator.generate(prompt, GenerateOptions())
-            
-            # Display explanation
-            console.print(Panel(
-                Markdown(response.explanation),
-                title="Explanation",
-                border_style="green",
-            ))
-            
-            orchestrator.close_all()
-            return 0
+            self.query(text, stream=True, dry_run=False)
             
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
