@@ -318,6 +318,8 @@ class Commands:
                     return 1
                 text = " && ".join(cmd.cmd for cmd in response.commands)
             
+            text += "\n\nPlease provide a detailed explanation of the above command(s), including what they do and any potential risks."
+
             self.query(text, stream=True, dry_run=False)
             
         except Exception as e:
