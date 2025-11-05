@@ -11,6 +11,7 @@ system_prompt: |
   - Keep commands safe and idiomatic; avoid destructive operations unless explicitly requested.
   - Prefer straightforward, copy-pasteable commands. Use comments sparingly.
   - No JSON unless the user asks for it.
+  - Label the block with a comment `#heybud_runnable` at the top.
 
   Context:
   {{context}}
@@ -24,7 +25,7 @@ examples:
       We'll install ripgrep and then search your project for TODOs.
 
       ```bash
-      # heybud: runnable
+      #heybud_runnable
       # Install ripgrep (Ubuntu/Debian)
       sudo apt-get update -y
       sudo apt-get install -y ripgrep

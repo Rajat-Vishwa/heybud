@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.syntax import Syntax
 from rich.status import Status
+from rich.text import Text
 
 from core.config import ConfigManager
 from core.context import ContextManager
@@ -31,8 +32,7 @@ from core.types import (
     FailoverStrategy,
 )
 
-console = Console()
-
+console = Console(stderr=True)
 
 class Commands:
     """CLI command implementations"""
@@ -88,21 +88,24 @@ class Commands:
                 with Live(Panel(Status("Thinking...", spinner="dots"), title="heybud", title_align="left", border_style="blue"), 
                           refresh_per_second=20, 
                           console=console) as live:
+                    
+                    def render_panel_with_body(body_renderable):
+                        return Panel(
+                            body_renderable,
+                            title="heybud",
+                            title_align="left",
+                            border_style="blue",
+                        )
           
                     def on_chunk_animated(chunk: str):
                         nonlocal displayed_text
                         for char in chunk:
                             displayed_text += char
-                            
-                            live.update(Panel(
-                                Markdown(displayed_text), # Re-render Markdown
-                                title="heybud", 
-                                title_align="left",
-                                border_style="blue"
-                            ))
-                            
+                            # Stream the explanation as Markdown inside the same panel
+                            live.update(render_panel_with_body(Markdown(displayed_text)))
                             time.sleep(0.01)
 
+                    # Stream tokens
                     response = orchestrator.generate(
                         prompt,
                         GenerateOptions(
@@ -113,6 +116,38 @@ class Commands:
                         stream=True,
                         on_chunk=on_chunk_animated,
                     )
+
+                    # After streaming completes, run a quick safety scan and append runnable commands (if any)
+                    if response and response.commands:
+                        scanner = SafetyScanner(self.config_manager.config.safety)
+                        safety_analysis = scanner.scan_commands(response.commands)
+                        response.safety = safety_analysis
+                        for cmd in response.commands:
+                            cmd_analysis = scanner.scan_command(cmd)
+                            cmd.risk_score = cmd_analysis.risk_score
+
+                        # Build a bash snippet for display (non-executable here)
+                        snippet_lines = ["#heybud_runnable"]
+                        # Mirror cwd/env in the snippet for context
+                        for cmd in response.commands:
+                            if cmd.cwd:
+                                snippet_lines.append(f"cd {cmd.cwd}")
+                            for k, v in (cmd.env or {}).items():
+                                snippet_lines.append(f"export {k}='{v}'")
+                            if cmd.cmd:
+                                snippet_lines.append(cmd.cmd)
+                        snippet = "\n".join(snippet_lines).strip()
+
+                        # Minimal high-risk flag if any command is high risk
+                        high_risk = any((getattr(cmd, 'risk_score', 0.0) or 0.0) >= 0.7 for cmd in response.commands)
+                        parts = [Markdown(displayed_text.strip())]
+                        parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
+                        if high_risk:
+                            parts.append(Text("HIGH RISK", style="bold red"))
+                        body = Group(*parts)
+                        live.update(render_panel_with_body(body))
+                        # Keep the final view stable for a brief moment
+                        time.sleep(0.1)
                 
                 explanation_streamed = True
             else:
@@ -127,15 +162,16 @@ class Commands:
             
             duration_ms = (time.time() - start_time) * 1000
             
-            # Safety scan
-            scanner = SafetyScanner(self.config_manager.config.safety)
-            safety_analysis = scanner.scan_commands(response.commands)
-            response.safety = safety_analysis
-            
-            # Update command risk scores
-            for cmd in response.commands:
-                cmd_analysis = scanner.scan_command(cmd)
-                cmd.risk_score = cmd_analysis.risk_score
+            # Safety scan (skip recomputation if already done during streaming)
+            if not (do_stream and explanation_streamed):
+                scanner = SafetyScanner(self.config_manager.config.safety)
+                safety_analysis = scanner.scan_commands(response.commands)
+                response.safety = safety_analysis
+                
+                # Update command risk scores
+                for cmd in response.commands:
+                    cmd_analysis = scanner.scan_command(cmd)
+                    cmd.risk_score = cmd_analysis.risk_score
             
             # Log query
             self.logger.log_query(
@@ -149,7 +185,13 @@ class Commands:
             self.context_manager.save_last_command(response)
             
             # Display response
-            self._display_response(response, dry_run, explanation_already_streamed=explanation_streamed)
+            # If we streamed and already rendered the commands panel, skip re-displaying
+            self._display_response(
+                response,
+                dry_run,
+                explanation_already_streamed=explanation_streamed,
+                commands_already_displayed=do_stream and explanation_streamed and bool(response.commands),
+            )
             
             # Close orchestrator
             orchestrator.close_all()
@@ -344,31 +386,40 @@ class Commands:
             console.print(f"[red]Error: {e}[/red]")
             return 1
     
-    def _display_response(self, response, dry_run: bool = False, explanation_already_streamed: bool = False) -> None:
+    def _display_response(self, response, dry_run: bool = False, explanation_already_streamed: bool = False, commands_already_displayed: bool = False) -> None:
         """Display LLM response"""
-        # Explanation (skip if we already streamed it)
+        # Unified panel with explanation and a code block for commands
+        body_parts = []
         if response.explanation and not explanation_already_streamed:
+            body_parts.append(Markdown(response.explanation))
+
+        if response.commands and not commands_already_displayed:
+            snippet_lines = ["#heybud_runnable"]
+            for cmd in response.commands:
+                if cmd.cwd:
+                    snippet_lines.append(f"cd {cmd.cwd}")
+                for k, v in (cmd.env or {}).items():
+                    snippet_lines.append(f"export {k}='{v}'")
+                if cmd.cmd:
+                    snippet_lines.append(cmd.cmd)
+            snippet = "\n".join(snippet_lines).strip()
+            body_parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
+
+            # Minimal high-risk flag beneath the snippet
+            if any((getattr(cmd, 'risk_score', 0.0) or 0.0) >= 0.7 for cmd in response.commands):
+                body_parts.append(Text("HIGH RISK", style="bold red"))
+
+        if body_parts:
             console.print(Panel(
-                Markdown(response.explanation),
-                title="Explanation",
+                Group(*body_parts),
+                title="heybud",
+                title_align="left",
                 border_style="blue",
             ))
             console.print()
-        
-        # Commands
+
+        # Quick hints
         if response.commands:
-            for cmd in response.commands:
-                risk_color = "green" if cmd.risk_score < 0.4 else "yellow" if cmd.risk_score < 0.7 else "red"
-                
-                console.print(Panel(
-                    f"[bold]{cmd.description}[/bold]\n\n"
-                    f"[{risk_color}]{cmd.cmd}[/{risk_color}]\n\n"
-                    f"Risk: {cmd.risk_score:.2f}",
-                    title=f"Command {cmd.id}",
-                    border_style=risk_color,
-                ))
-            
-            console.print()
             console.print("[dim]To execute: [/dim][bold green]heybud okay[/bold green]")
             console.print("[dim]To copy: [/dim][bold]heybud copy[/bold]")
         
