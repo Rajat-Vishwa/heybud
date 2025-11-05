@@ -126,22 +126,22 @@ class Commands:
                             cmd_analysis = scanner.scan_command(cmd)
                             cmd.risk_score = cmd_analysis.risk_score
 
-                        # Build a bash snippet for display (non-executable here)
-                        snippet_lines = ["#heybud_runnable"]
-                        # Mirror cwd/env in the snippet for context
-                        for cmd in response.commands:
-                            if cmd.cwd:
-                                snippet_lines.append(f"cd {cmd.cwd}")
-                            for k, v in (cmd.env or {}).items():
-                                snippet_lines.append(f"export {k}='{v}'")
-                            if cmd.cmd:
-                                snippet_lines.append(cmd.cmd)
-                        snippet = "\n".join(snippet_lines).strip()
+                        # # Build a bash snippet for display (non-executable here)
+                        # snippet_lines = ["#heybud_runnable"]
+                        # # Mirror cwd/env in the snippet for context
+                        # for cmd in response.commands:
+                        #     if cmd.cwd:
+                        #         snippet_lines.append(f"cd {cmd.cwd}")
+                        #     for k, v in (cmd.env or {}).items():
+                        #         snippet_lines.append(f"export {k}='{v}'")
+                        #     if cmd.cmd:
+                        #         snippet_lines.append(cmd.cmd)
+                        # snippet = "\n".join(snippet_lines).strip()
 
                         # Minimal high-risk flag if any command is high risk
                         high_risk = any((getattr(cmd, 'risk_score', 0.0) or 0.0) >= 0.7 for cmd in response.commands)
                         parts = [Markdown(displayed_text.strip())]
-                        parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
+                        # parts.append(Syntax(snippet or "# No runnable commands", "bash", theme="monokai", word_wrap=True))
                         if high_risk:
                             parts.append(Text("HIGH RISK", style="bold red"))
                         body = Group(*parts)

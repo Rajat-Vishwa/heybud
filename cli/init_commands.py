@@ -143,7 +143,7 @@ class InitCommand:
                         console.print(f"[green]✓ API key saved to ~/.heybud/credentials.json[/green]")
                 
                 endpoint = None
-            
+
             provider = ProviderConfig(
                 id=provider_id,
                 provider=provider_type,
@@ -153,6 +153,16 @@ class InitCommand:
                 api_key=api_key,
                 endpoint=endpoint,
             )
+
+            # Advanced llm configs (Optional / Skippable)
+            if Confirm.ask("Set advanced options (max_tokens, temperature, timeout)?", default=False):
+                max_tokens = Prompt.ask("Max tokens", default=str(provider.max_tokens))
+                temperature = Prompt.ask("Temperature", default=str(provider.temperature))
+                timeout = Prompt.ask("Timeout (seconds)", default=str(provider.timeout))
+                
+                provider.max_tokens = int(max_tokens)
+                provider.temperature = float(temperature)
+                provider.timeout = int(timeout)
             
             # Test provider
             if Confirm.ask("Test this provider?", default=True):
