@@ -6,6 +6,8 @@ Your friendly AI assistant that lives in your terminal, helping you craft the pe
 
 heybud is a smart command-line tool that understands what you want to do and suggests the right shell commands. It works right in your current shell session, preserving your environment and context.
 
+![heybud demo](docs/assets/heybud-demo.gif)
+
 ## ✨ What makes heybud special
 
 - **Same-shell execution**: Commands run in your active shell, keeping environments, variables, and directory changes
